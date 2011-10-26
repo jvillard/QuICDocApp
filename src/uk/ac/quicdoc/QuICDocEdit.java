@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.NotificationManager;
 import android.os.IBinder;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.widget.EditText;
 import android.widget.Toast;
 import android.view.View.*;
@@ -15,7 +17,9 @@ import android.content.ServiceConnection;
 import android.util.Log;
 import android.net.http.AndroidHttpClient;
 import android.widget.TextView.BufferType;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.net.Uri;
 
 import java.io.BufferedReader;
@@ -40,8 +44,57 @@ public class QuICDocEdit extends Activity
     int myID = -1;
     String doc = "j'aime les arcs en ciel\nvus de ma fenêtre";
     String marty = "j'aime les arcs en ciel\nvus de ma fenêtre";
+    EditText edittext;
     DefaultHttpClient httpClient = new DefaultHttpClient(); // TODO: do internet in a separate thread
     String servername = "roquette.dyndns.org:4242";
+
+    boolean focused = true;
+    Thread timer = new Thread() {
+	    void syncDoc() {
+		HttpGet req = new HttpGet("http://" + servername + "/getDiff?" + myID);
+		
+		try {
+		    HttpResponse resp = httpClient.execute(req);
+		    
+		    StatusLine status = resp.getStatusLine();
+		    if (status.getStatusCode() != 200) {
+			Log.d("bite", "HTTP error, invalid server status code: " + resp.getStatusLine());
+		    }
+		    
+		    String json = convertStreamToString(resp.getEntity().getContent());
+		    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
+		    Log.i("bite","zizi");
+		    String s = doc;
+		    for(int i = 0 ; i < diffs.length(); i++) {
+			JSONObject o = diffs.getJSONObject(i);
+			Diff d;
+			Log.i("bite","caca");
+			if (o.getString("type").equals("insert"))
+			    d = new Diff(o.getInt("point"),
+					 o.getString("content"));
+			else {
+			    d = new Diff(o.getInt("point"),
+					 o.getInt("length"));
+			}
+			Log.i("bite","bite" + d);
+			s = d.applyDiff(s);
+		    }
+		    Message.obtain(uiCallback,0,s).sendToTarget();
+		} catch (IOException e) {}
+		catch (org.json.JSONException e) {
+		    Log.d("bite", "Got an ununJSONable diff array");
+		}
+	    }
+	    
+	    public void run () {
+		for (;focused;) {
+		    syncDoc();
+		    try {
+			Thread.sleep(1000);
+		    } catch (java.lang.InterruptedException e) {}
+		}
+	    }
+	};
 
     private void getdoc() {
 	Log.i("bite", "logging in");
@@ -82,7 +135,12 @@ public class QuICDocEdit extends Activity
 	if (marty.equals(doc)) return true;
 	Log.i("bite", "...for real");
 
-	DiffArray diffs = new DiffArray(doc, marty);
+	return updateServerWithDiffs(new DiffArray(doc, marty));
+    }
+
+    boolean updateServerWithDiffs(DiffArray diffs) {
+	if (diffs.length() == 0) return true;
+
 	JSONStringer putreq = new JSONStringer();
 
 	try {
@@ -161,24 +219,37 @@ public class QuICDocEdit extends Activity
 	
 	//this.doBindService();
 
-	final EditText edittext = (EditText) findViewById(R.id.edittext);
+	edittext = (EditText) findViewById(R.id.edittext);
 
 	edittext.setText(doc,BufferType.EDITABLE);
 
-	edittext.setOnKeyListener(new OnKeyListener() {
-		public boolean onKey(View v, int keyCode, KeyEvent event) {
-		    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-			// Perform action on any key press
-			boolean event_handled = edittext.onKeyDown(keyCode, event);
-			marty = edittext.getText().toString();
-			if (updateServer())
-			    doc = marty;
-			return event_handled;
-		    }
-		    return false;
+	edittext.addTextChangedListener(new TextWatcher() {
+		public void onTextChanged(CharSequence s, int start, int before, int count) { }
+		public void afterTextChanged(Editable s) {
+		    marty = s.toString();
+		    if (updateServer())
+			doc = marty;
 		}
-	    });
+		public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+		}
+	    );
+	
+	focused = true;
+	timer.start();
     }
+
+    @Override
+    public void onPause() {
+	super.onPause();
+	focused = false;
+    }
+
+    private Handler uiCallback = new Handler () {
+	    public void handleMessage (Message msg) {
+		doc = marty = (String) msg.obj;
+		edittext.setText(doc,BufferType.EDITABLE);		
+	    }
+	};
 }
 
 enum DiffType { INSERT, DELETE }
@@ -217,7 +288,7 @@ class Diff extends JSONObject {
 	    return s.substring(0,point) + content + s.substring(point, s.length());
         }
 	// else it's a DELETE (stupid Java won't let me put it an else branch)
-	return s.substring(0,point) + s.substring(point + content.length(), s.length());
+	return s.substring(0,point) + s.substring(point + length, s.length());
     }
 
     // Tells you if two diffs clash footprints
@@ -268,6 +339,17 @@ class DiffArray extends JSONArray {
         if(i+j != newStr.length()) {
 	    // Some stuff was added to newStr
 	    put(new Diff(i, newStr.substring(i,newStr.length()-j)));
+        }
+    }
+
+    public DiffArray(CharSequence s, int start, int before, int count) {
+        if(before > 0) {
+	    // Some stuff was deleted
+	    put(new Diff(start, before));
+        }
+        if(count > 0) {
+	    // Some stuff was added
+	    put(new Diff(start, s.subSequence(start,start + count).toString()));
         }
     }
 }
