@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QuICDocEdit</string>
+    <string name="service_name">QuICDocClient</string>
+    <string name="quicdoc_service_started">QuICDoc Service running</string>
+    <string name="quicdoc_service_stopped">QuICDoc Service stopped</string>
+    <string name="quicdoc_service_connected">connected to QuICDoc Service</string>
+    <string name="quicdoc_service_disconnected">disconnected from QuICDoc Service</string>
+    <string name="quicdoc_service_label">totobite</string>
+</resources>
