@@ -72,9 +72,14 @@ public class QuICDocEdit extends Activity
 	Log.i("bite", "logged in");
     }
 
-    void updateServer() {
+    boolean updateServer() {
+	/**
+	 * Sends our local changes to the server.
+	 * Returns success value.
+	 */
+	
 	Log.i("bite", "updating server...");
-	if (marty.equals(doc)) return;
+	if (marty.equals(doc)) return true;
 	Log.i("bite", "...for real");
 
 	DiffArray diffs = new DiffArray(doc, marty);
@@ -90,6 +95,7 @@ public class QuICDocEdit extends Activity
 		.toString();
 	} catch (org.json.JSONException e) {
 	    Log.d("bite", "could not json the diffs");
+	    return false;
 	}
 	
 	HttpGet req = new HttpGet("http://" + servername + "/putDiff?" + Uri.encode(putreq.toString()));
@@ -102,17 +108,18 @@ public class QuICDocEdit extends Activity
 	    StatusLine status = resp.getStatusLine();
 	    if (status.getStatusCode() != 200) {
 		Log.d("bite", "HTTP error, invalid server status code: " + resp.getStatusLine());
-		return;
+		return false;
 	    }
 
 	    String answer = convertStreamToString(resp.getEntity().getContent());
 	    if(!answer.equals("OK\n")) {
 		Toast.makeText(QuICDocEdit.this, "Concurrency Error!",
 			       Toast.LENGTH_SHORT).show();
-		doc = marty;
+		return false;
 	    }
 	    Log.i("bite", "server updated");
-	} catch (IOException e) {}
+	    return true;
+	} catch (IOException e) { return false; }
     }
 
     private static String convertStreamToString(InputStream is) {
@@ -164,7 +171,8 @@ public class QuICDocEdit extends Activity
 			// Perform action on any key press
 			boolean event_handled = edittext.onKeyDown(keyCode, event);
 			marty = edittext.getText().toString();
-			updateServer();
+			if (updateServer())
+			    doc = marty;
 			return event_handled;
 		    }
 		    return false;
