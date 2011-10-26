@@ -12,9 +12,5 @@
 	<category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
-    <service android:exported="false"
-	     android:label="@string/service_name"
-	     android:name="QuICDocClient">
-    </service>
   </application>
 </manifest>
