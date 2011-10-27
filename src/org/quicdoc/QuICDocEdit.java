@@ -2,9 +2,11 @@ package org.quicdoc;
 
 import android.app.Activity;
 import android.app.NotificationManager;
+import android.os.AsyncTask;
 import android.os.IBinder;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.widget.EditText;
 import android.widget.Toast;
@@ -39,145 +41,216 @@ import org.apache.http.impl.client.DefaultHttpClient;
 
 import org.json.*;
 
+enum Tag {
+    CLIENT_READY,
+	UPDATE_SERVER,
+	SYNC_DOC,
+	SYNCED_DOC,
+	GET_DOC,
+	GOT_DOC;
+}
+
 public class QuICDocEdit extends Activity
 {
-    int myID = -1;
-    String doc = "j'aime les arcs en ciel\nvus de ma fenêtre";
-    String marty = "j'aime les arcs en ciel\nvus de ma fenêtre";
+    String doc = "Loading document.";
+    String marty = "Loading document.";
     EditText edittext;
-    DefaultHttpClient httpClient = new DefaultHttpClient(); // TODO: do internet in a separate thread
-    String servername = "roquette.dyndns.org:4242";
+    String serverName = "roquette.dyndns.org:4242";
+    private Handler uiHandler;
+    private QuICClient client;
+    boolean focused;
 
-    boolean focused = true;
-    Thread timer = new Thread() {
-	    void syncDoc() {
-		HttpGet req = new HttpGet("http://" + servername + "/getDiff?" + myID);
-		
-		try {
-		    HttpResponse resp = httpClient.execute(req);
-		    
-		    StatusLine status = resp.getStatusLine();
-		    if (status.getStatusCode() != 200) {
-			Log.d("bite", "HTTP error, invalid server status code: " + resp.getStatusLine());
+    /** Called when the activity is first created. */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.main);
+
+	edittext = (EditText) findViewById(R.id.edittext);
+	edittext.setText(doc,BufferType.EDITABLE);
+
+	uiHandler = new UiHandler();
+
+	client = new QuICClient(uiHandler);
+	client.start();
+    }
+
+    @Override
+    public void onPause() {
+	super.onPause();
+	focused = false;
+    }
+
+    @Override
+    public void onResume() {
+	super.onResume();
+	focused = true;
+    }
+
+    private class UiHandler extends Handler {
+	public void handleMessage (Message msg) {
+	    switch (Tag.values()[msg.what]) {
+		case CLIENT_READY:
+		    Message.obtain(client.mHandler, Tag.GET_DOC.ordinal(), serverName).sendToTarget(); break;
+		case GOT_DOC:
+		    edittext.addTextChangedListener(new TextWatcher() {
+			    public void onTextChanged(CharSequence s, int start, int before, int count) { }
+			    public void afterTextChanged(Editable s) {
+				marty = s.toString();
+				Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
+				doc = marty;
+			    }
+			    public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+			});
+		    edittext.setText((String) msg.obj, BufferType.EDITABLE);
+		    timer.start();
+		    break;
+		case SYNCED_DOC:
+		    if (msg.arg1 > 0) {
+			doc = marty = (String) msg.obj;
+			edittext.setText(doc,BufferType.EDITABLE);
 		    }
-		    
-		    String json = convertStreamToString(resp.getEntity().getContent());
-		    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
-		    Log.i("bite","zizi");
-		    String s = doc;
-		    for(int i = 0 ; i < diffs.length(); i++) {
-			JSONObject o = diffs.getJSONObject(i);
-			Diff d;
-			Log.i("bite","caca");
-			if (o.getString("type").equals("insert"))
-			    d = new Diff(o.getInt("point"),
-					 o.getString("content"));
-			else {
-			    d = new Diff(o.getInt("point"),
-					 o.getInt("length"));
-			}
-			Log.i("bite","bite" + d);
-			s = d.applyDiff(s);
-		    }
-		    Message.obtain(uiCallback,0,s).sendToTarget();
-		} catch (IOException e) {}
-		catch (org.json.JSONException e) {
-		    Log.d("bite", "Got an ununJSONable diff array");
+		    Log.i("quicdoc","synced");
 		}
-	    }
-	    
+	}
+    }
+
+    Thread timer = new Thread() {	    
 	    public void run () {
-		for (;focused;) {
-		    syncDoc();
+		while (focused) {
+		    Log.i("quicdoc","syncing");
+		    Message.obtain(client.mHandler, Tag.SYNC_DOC.ordinal(), doc).sendToTarget();
 		    try {
 			Thread.sleep(1000);
 		    } catch (java.lang.InterruptedException e) {}
 		}
 	    }
 	};
+}
 
-    private void getdoc() {
-	Log.i("bite", "logging in");
 
-	HttpGet req = new HttpGet("http://" + servername + "/getDoc");
+class QuICClient extends Thread {
+    private Handler backHandler;
+    public Handler mHandler;
+    final AndroidHttpClient httpClient = AndroidHttpClient.newInstance("QuICDoc");
+    String serverName;
+    int myId;
 
+    public QuICClient(Handler h) {
+	backHandler = h;
+    }
+    
+    public void run() {
+	Looper.prepare();
+	mHandler = new QuICClientHandler();
+	Message.obtain(backHandler, Tag.CLIENT_READY.ordinal()).sendToTarget();
+	Looper.loop();
+    }
+
+    private class QuICClientHandler extends Handler {
+	public void handleMessage(Message msg) {
+	    switch (Tag.values()[msg.what]) {
+		case GET_DOC: serverName = (String) msg.obj; getDoc(); break;
+		case UPDATE_SERVER: updateServer((DiffArray) msg.obj); break;
+		case SYNC_DOC: syncDoc((String) msg.obj); break;
+		}
+	}
+    }
+
+    protected void getDoc() {
+	HttpGet req = new HttpGet("http://" + serverName + "/getDoc");
 	try {
+	    Log.i("quicdoc", "sending request");
 	    HttpResponse resp = httpClient.execute(req);
-	
+	    Log.i("quicdoc", "sent request");
+		    
 	    StatusLine status = resp.getStatusLine();
 	    if (status.getStatusCode() != 200) {
-		Log.d("bite", "HTTP error, invalid server status code: " + resp.getStatusLine());
+		Log.d("quicdoc", "HTTP error, invalid server status code: " + resp.getStatusLine());
 		return;
 	    }
-
+		
 	    String json = convertStreamToString(resp.getEntity().getContent());
 	    JSONArray a = (JSONArray) new JSONTokener(json).nextValue();
-	    doc = marty = a.getString(0);
-	    myID = a.getInt(1);
-	    
+	    Message.obtain(backHandler, Tag.GOT_DOC.ordinal(), a.getString(0)).sendToTarget();
+	    myId = a.getInt(1);
 	} catch (IOException e) {
-	    Log.d("bite", "HTTP IO error");
+	    Log.d("quicdoc", "HTTP IO error: " +e);
+	} catch (org.json.JSONException e) {
+	    Log.d("quicdoc", "Got an unJSONable doc");
 	}
-	catch (org.json.JSONException e) {
-	    Log.d("bite", "Got an unJSONable doc");
-	}
-
-	Log.i("bite", "logged in");
     }
 
-    boolean updateServer() {
-	/**
-	 * Sends our local changes to the server.
-	 * Returns success value.
-	 */
-	
-	Log.i("bite", "updating server...");
-	if (marty.equals(doc)) return true;
-	Log.i("bite", "...for real");
-
-	return updateServerWithDiffs(new DiffArray(doc, marty));
-    }
-
-    boolean updateServerWithDiffs(DiffArray diffs) {
-	if (diffs.length() == 0) return true;
-
+    void updateServer(DiffArray diffs) {
 	JSONStringer putreq = new JSONStringer();
 
 	try {
 	    putreq.object()
 		.key("uid")
-		.value(myID)
+		.value(myId)
 		.key("diffs")
 		.value(diffs)
 		.endObject()
 		.toString();
 	} catch (org.json.JSONException e) {
-	    Log.d("bite", "could not json the diffs");
-	    return false;
+	    Log.d("quicdoc", "could not json the diffs");
+	    return;
 	}
 	
-	HttpGet req = new HttpGet("http://" + servername + "/putDiff?" + Uri.encode(putreq.toString()));
-
-	Log.i("bite", putreq.toString());
+	HttpGet req = new HttpGet("http://" + serverName + "/putDiff?" + Uri.encode(putreq.toString()));
+	Log.i("quicdoc", "updating server with "+putreq);
 
 	try {
 	    HttpResponse resp = httpClient.execute(req);
 	
 	    StatusLine status = resp.getStatusLine();
 	    if (status.getStatusCode() != 200) {
-		Log.d("bite", "HTTP error, invalid server status code: " + resp.getStatusLine());
-		return false;
+		Log.d("quicdoc", "HTTP error, invalid server status code: " + resp.getStatusLine());
+		return;
 	    }
-
 	    String answer = convertStreamToString(resp.getEntity().getContent());
 	    if(!answer.equals("OK\n")) {
-		Toast.makeText(QuICDocEdit.this, "Concurrency Error!",
-			       Toast.LENGTH_SHORT).show();
-		return false;
+		Log.d("quicdoc", "Concurrency Error!");
+		return;
 	    }
-	    Log.i("bite", "server updated");
-	    return true;
-	} catch (IOException e) { return false; }
+	    Log.i("quicdoc", "returning");
+	} catch (IOException e) { }
+    }
+
+    void syncDoc(String doc) {
+	HttpGet req = new HttpGet("http://" + serverName + "/getDiff?" + myId);
+		
+	try {
+	    HttpResponse resp = httpClient.execute(req);
+		    
+	    StatusLine status = resp.getStatusLine();
+	    if (status.getStatusCode() != 200) {
+		Log.d("quicdoc", "HTTP error, invalid server status code: " + resp.getStatusLine());
+	    }
+		    
+	    String json = convertStreamToString(resp.getEntity().getContent());
+	    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
+	    Log.i("quicdoc","zizi");
+	    int i;
+	    for(i = 0; i < diffs.length(); i++) {
+		JSONObject o = diffs.getJSONObject(i);
+		Diff d;
+		Log.i("quicdoc","caca");
+		if (o.getString("type").equals("insert"))
+		    d = new Diff(o.getInt("point"),
+				 o.getString("content"));
+		else {
+		    d = new Diff(o.getInt("point"),
+				 o.getInt("length"));
+		}
+		Log.i("quicdoc","quicdoc" + d);
+		doc = d.applyDiff(doc);
+	    }
+	    Message.obtain(backHandler, Tag.SYNCED_DOC.ordinal(), i, 0, doc).sendToTarget();
+	} catch (IOException e) {}
+	catch (org.json.JSONException e) {
+	    Log.d("quicdoc", "Got an ununJSONable diff array");
+	}
     }
 
     private static String convertStreamToString(InputStream is) {
@@ -208,48 +281,6 @@ public class QuICDocEdit extends Activity
 	}
 	return sb.toString();
     }
-
-    /** Called when the activity is first created. */
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.main);
-
-	getdoc();
-	
-	//this.doBindService();
-
-	edittext = (EditText) findViewById(R.id.edittext);
-
-	edittext.setText(doc,BufferType.EDITABLE);
-
-	edittext.addTextChangedListener(new TextWatcher() {
-		public void onTextChanged(CharSequence s, int start, int before, int count) { }
-		public void afterTextChanged(Editable s) {
-		    marty = s.toString();
-		    if (updateServer())
-			doc = marty;
-		}
-		public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-		}
-	    );
-	
-	focused = true;
-	timer.start();
-    }
-
-    @Override
-    public void onPause() {
-	super.onPause();
-	focused = false;
-    }
-
-    private Handler uiCallback = new Handler () {
-	    public void handleMessage (Message msg) {
-		doc = marty = (String) msg.obj;
-		edittext.setText(doc,BufferType.EDITABLE);		
-	    }
-	};
 }
 
 enum DiffType { INSERT, DELETE }
