@@ -47,7 +47,8 @@ enum Tag {
 	SYNC_DOC,
 	SYNCED_DOC,
 	GET_DOC,
-	GOT_DOC;
+	GOT_DOC,
+	STOP;
 }
 
 public class QuICDocEdit extends Activity
@@ -72,46 +73,50 @@ public class QuICDocEdit extends Activity
 	uiHandler = new UiHandler();
 
 	client = new QuICClient(uiHandler);
-	client.start();
     }
 
     @Override
     public void onPause() {
 	super.onPause();
 	focused = false;
+	Message.obtain(client.mHandler, Tag.STOP.ordinal()).sendToTarget();
     }
 
     @Override
     public void onResume() {
 	super.onResume();
 	focused = true;
+	client.start();
     }
 
     private class UiHandler extends Handler {
 	public void handleMessage (Message msg) {
 	    switch (Tag.values()[msg.what]) {
-		case CLIENT_READY:
-		    Message.obtain(client.mHandler, Tag.GET_DOC.ordinal(), serverName).sendToTarget(); break;
-		case GOT_DOC:
-		    edittext.addTextChangedListener(new TextWatcher() {
-			    public void onTextChanged(CharSequence s, int start, int before, int count) { }
-			    public void afterTextChanged(Editable s) {
-				marty = s.toString();
-				Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
-				doc = marty;
-			    }
-			    public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-			});
-		    edittext.setText((String) msg.obj, BufferType.EDITABLE);
-		    timer.start();
-		    break;
-		case SYNCED_DOC:
-		    if (msg.arg1 > 0) {
-			doc = marty = (String) msg.obj;
-			edittext.setText(doc,BufferType.EDITABLE);
-		    }
-		    Log.i("quicdoc","synced");
+	    case CLIENT_READY:
+		Log.i("quicdoc", "Client ready.");
+		Message.obtain(client.mHandler, Tag.GET_DOC.ordinal(), serverName).sendToTarget(); break;
+	    case GOT_DOC:
+		Log.i("quicdoc", "Got document.");
+		edittext.addTextChangedListener(new TextWatcher() {
+			public void onTextChanged(CharSequence s, int start, int before, int count) { }
+			public void afterTextChanged(Editable s) {
+			    marty = s.toString();
+			    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
+			    doc = marty;
+			}
+			public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+		    });
+		doc = marty = (String) msg.obj;
+		edittext.setText(doc, BufferType.EDITABLE);
+		timer.start();
+		break;
+	    case SYNCED_DOC:
+		Log.i("quicdoc", "Synced with server.");
+		if (msg.arg1 > 0) {
+		    doc = marty = (String) msg.obj;
+		    edittext.setText(doc,BufferType.EDITABLE);
 		}
+	    }
 	}
     }
 
@@ -150,19 +155,18 @@ class QuICClient extends Thread {
     private class QuICClientHandler extends Handler {
 	public void handleMessage(Message msg) {
 	    switch (Tag.values()[msg.what]) {
-		case GET_DOC: serverName = (String) msg.obj; getDoc(); break;
-		case UPDATE_SERVER: updateServer((DiffArray) msg.obj); break;
-		case SYNC_DOC: syncDoc((String) msg.obj); break;
-		}
+	    case GET_DOC: serverName = (String) msg.obj; getDoc(); break;
+	    case UPDATE_SERVER: updateServer((DiffArray) msg.obj); break;
+	    case SYNC_DOC: syncDoc((String) msg.obj); break;
+	    case STOP: Looper.myLooper().quit(); httpClient.close();
+	    }
 	}
     }
 
     protected void getDoc() {
 	HttpGet req = new HttpGet("http://" + serverName + "/getDoc");
 	try {
-	    Log.i("quicdoc", "sending request");
 	    HttpResponse resp = httpClient.execute(req);
-	    Log.i("quicdoc", "sent request");
 		    
 	    StatusLine status = resp.getStatusLine();
 	    if (status.getStatusCode() != 200) {
@@ -230,12 +234,10 @@ class QuICClient extends Thread {
 		    
 	    String json = convertStreamToString(resp.getEntity().getContent());
 	    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
-	    Log.i("quicdoc","zizi");
 	    int i;
 	    for(i = 0; i < diffs.length(); i++) {
 		JSONObject o = diffs.getJSONObject(i);
 		Diff d;
-		Log.i("quicdoc","caca");
 		if (o.getString("type").equals("insert"))
 		    d = new Diff(o.getInt("point"),
 				 o.getString("content"));
@@ -243,7 +245,6 @@ class QuICClient extends Thread {
 		    d = new Diff(o.getInt("point"),
 				 o.getInt("length"));
 		}
-		Log.i("quicdoc","quicdoc" + d);
 		doc = d.applyDiff(doc);
 	    }
 	    Message.obtain(backHandler, Tag.SYNCED_DOC.ordinal(), i, 0, doc).sendToTarget();
