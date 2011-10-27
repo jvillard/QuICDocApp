@@ -1,4 +1,7 @@
 package org.quicdoc;
+
+import android.widget.EditText;
+import android.widget.TextView.BufferType;
 import org.json.*;
 
 enum DiffType { INSERT, DELETE }
@@ -32,12 +35,32 @@ class Diff extends JSONObject {
 	} catch (JSONException e) {}
     }
 
-    public String applyDiff(String s) {
-        if(type == DiffType.INSERT) {
-	    return s.substring(0,point) + content + s.substring(point, s.length());
-        }
-	// else it's a DELETE (stupid Java won't let me put it an else branch)
-	return s.substring(0,point) + s.substring(point + length, s.length());
+    public EditText applyDiff(EditText t) {
+	String s = t.getText().toString();
+	int selStart = t.getSelectionStart();
+	int selEnd = t.getSelectionEnd();
+
+        if (type == DiffType.INSERT) {
+	    s = s.substring(0,point) + content + s.substring(point);
+	    if (point <= selStart) {
+		selStart += length; selEnd += length;
+	    } else if (point <= t.getSelectionEnd())
+		selEnd = selStart;
+        } else {
+	    // else it's a DELETE
+	    s = s.substring(0,point) + s.substring(point + length, s.length());
+	    if (point <= selStart) {
+		if (point + length <= selStart) {
+		    selStart -= length; selEnd -= length;
+		} else {
+		    selStart = selEnd = point;
+		}
+	    } else if (point > selStart && point <= selEnd)
+		selEnd = selStart;
+	}
+	t.setText(s, BufferType.EDITABLE);
+	t.setSelection(selStart, selEnd);
+	return t;
     }
 
     // Tells you if two diffs clash footprints

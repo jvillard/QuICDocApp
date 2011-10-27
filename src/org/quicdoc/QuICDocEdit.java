@@ -55,10 +55,11 @@ public class QuICDocEdit extends Activity
 {
     String doc = "Loading document.";
     String marty = "Loading document.";
-    EditText edittext;
+    EditText editText;
     String serverName = "roquette.dyndns.org:4242";
     private Handler uiHandler;
     private QuICClient client;
+    private final DocWatcher docWatcher = new DocWatcher();
     boolean focused;
 
     /** Called when the activity is first created. */
@@ -67,8 +68,8 @@ public class QuICDocEdit extends Activity
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
-	edittext = (EditText) findViewById(R.id.edittext);
-	edittext.setText(doc,BufferType.EDITABLE);
+	editText = (EditText) findViewById(R.id.edittext);
+	editText.setText(doc,BufferType.EDITABLE);
 
 	uiHandler = new UiHandler();
 
@@ -97,33 +98,53 @@ public class QuICDocEdit extends Activity
 		Message.obtain(client.mHandler, Tag.GET_DOC.ordinal(), serverName).sendToTarget(); break;
 	    case GOT_DOC:
 		Log.i("quicdoc", "Got document.");
-		edittext.addTextChangedListener(new TextWatcher() {
-			public void onTextChanged(CharSequence s, int start, int before, int count) { }
-			public void afterTextChanged(Editable s) {
-			    marty = s.toString();
-			    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
-			    doc = marty;
-			}
-			public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-		    });
 		doc = marty = (String) msg.obj;
-		edittext.setText(doc, BufferType.EDITABLE);
+		editText.setText(doc, BufferType.EDITABLE);
+		editText.addTextChangedListener(docWatcher);
 		timer.start();
 		break;
 	    case SYNCED_DOC:
-		Log.i("quicdoc", "Synced with server.");
-		if (msg.arg1 > 0) {
-		    doc = marty = (String) msg.obj;
-		    edittext.setText(doc,BufferType.EDITABLE);
+		editText.removeTextChangedListener(docWatcher);
+		JSONArray diffs = (JSONArray) msg.obj; 
+		int i;
+		for (i = 0; i < diffs.length(); i++) {
+		    try {
+			JSONObject o = diffs.getJSONObject(i);
+			Diff d;
+			if (o.getString("type").equals("insert"))
+			    d = new Diff(o.getInt("point"),
+					 o.getString("content"));
+			else {
+			    d = new Diff(o.getInt("point"),
+					 o.getInt("length"));
+			}
+			d.applyDiff(editText);
+		    } catch (org.json.JSONException e) {
+			Log.d("quicdoc", "Got an ununJSONable diff array");
+		    }
 		}
+		doc = marty = editText.getText().toString();
+		editText.addTextChangedListener(docWatcher);
+		if (i > 0)
+		    Log.i("quicdoc", "Applied modifs from server.");
 	    }
 	}
     }
 
+    private class DocWatcher implements TextWatcher {
+	public void onTextChanged(CharSequence s, int start, int before, int count) { }
+	public void afterTextChanged(Editable s) {
+	    marty = s.toString();
+	    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
+	    doc = marty;
+	}
+	public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+    }
+
+
     Thread timer = new Thread() {	    
 	    public void run () {
 		while (focused) {
-		    Log.i("quicdoc","syncing");
 		    Message.obtain(client.mHandler, Tag.SYNC_DOC.ordinal(), doc).sendToTarget();
 		    try {
 			Thread.sleep(1000);
@@ -186,6 +207,8 @@ class QuICClient extends Thread {
     }
 
     void updateServer(DiffArray diffs) {
+	if (diffs.length() == 0) return;
+
 	JSONStringer putreq = new JSONStringer();
 
 	try {
@@ -217,7 +240,6 @@ class QuICClient extends Thread {
 		Log.d("quicdoc", "Concurrency Error!");
 		return;
 	    }
-	    Log.i("quicdoc", "returning");
 	} catch (IOException e) { }
     }
 
@@ -234,20 +256,7 @@ class QuICClient extends Thread {
 		    
 	    String json = convertStreamToString(resp.getEntity().getContent());
 	    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
-	    int i;
-	    for(i = 0; i < diffs.length(); i++) {
-		JSONObject o = diffs.getJSONObject(i);
-		Diff d;
-		if (o.getString("type").equals("insert"))
-		    d = new Diff(o.getInt("point"),
-				 o.getString("content"));
-		else {
-		    d = new Diff(o.getInt("point"),
-				 o.getInt("length"));
-		}
-		doc = d.applyDiff(doc);
-	    }
-	    Message.obtain(backHandler, Tag.SYNCED_DOC.ordinal(), i, 0, doc).sendToTarget();
+	    Message.obtain(backHandler, Tag.SYNCED_DOC.ordinal(), diffs).sendToTarget();
 	} catch (IOException e) {}
 	catch (org.json.JSONException e) {
 	    Log.d("quicdoc", "Got an ununJSONable diff array");
