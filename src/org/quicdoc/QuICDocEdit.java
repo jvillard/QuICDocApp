@@ -1,43 +1,27 @@
 package org.quicdoc;
 
 import android.app.Activity;
-import android.app.NotificationManager;
-import android.os.AsyncTask;
-import android.os.IBinder;
+import android.net.Uri;
+import android.net.http.AndroidHttpClient;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.widget.EditText;
-import android.widget.Toast;
-import android.view.View.*;
-import android.view.*;
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
-import android.content.ServiceConnection;
-import android.util.Log;
-import android.net.http.AndroidHttpClient;
-import android.widget.TextView.BufferType;
 import android.text.Editable;
-import android.text.TextUtils;
 import android.text.TextWatcher;
-import android.net.Uri;
+import android.util.Log;
+import android.view.*;
+import android.widget.EditText;
+import android.widget.TextView.BufferType;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.zip.GZIPInputStream;
 
-import org.apache.http.Header;
-import org.apache.http.HttpEntity;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.HttpResponse;
 import org.apache.http.StatusLine;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DefaultHttpClient;
 
 import org.json.*;
 
@@ -51,8 +35,7 @@ enum Tag {
 	STOP;
 }
 
-public class QuICDocEdit extends Activity
-{
+public class QuICDocEdit extends Activity {
     String doc = "Loading document.";
     String marty = "Loading document.";
     EditText editText;
@@ -138,7 +121,7 @@ public class QuICDocEdit extends Activity
 	    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
 	    doc = marty;
 	}
-	public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+	public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
     }
 
 
@@ -148,7 +131,7 @@ public class QuICDocEdit extends Activity
 		    Message.obtain(client.mHandler, Tag.SYNC_DOC.ordinal(), doc).sendToTarget();
 		    try {
 			Thread.sleep(1000);
-		    } catch (java.lang.InterruptedException e) {}
+		    } catch (java.lang.InterruptedException e) { }
 		}
 	    }
 	};
@@ -165,7 +148,8 @@ class QuICClient extends Thread {
     public QuICClient(Handler h) {
 	backHandler = h;
     }
-    
+
+    @Override
     public void run() {
 	Looper.prepare();
 	mHandler = new QuICClientHandler();
@@ -257,8 +241,8 @@ class QuICClient extends Thread {
 	    String json = convertStreamToString(resp.getEntity().getContent());
 	    JSONArray diffs = (JSONArray) new JSONTokener(json).nextValue();
 	    Message.obtain(backHandler, Tag.SYNCED_DOC.ordinal(), diffs).sendToTarget();
-	} catch (IOException e) {}
-	catch (org.json.JSONException e) {
+	} catch (IOException e) {
+	} catch (org.json.JSONException e) {
 	    Log.d("quicdoc", "Got an ununJSONable diff array");
 	}
     }
