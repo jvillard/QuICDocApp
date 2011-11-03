@@ -2,7 +2,6 @@ package org.quicdoc;
 
 import android.app.Activity;
 import android.net.Uri;
-import android.net.http.AndroidHttpClient;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,6 +19,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.HttpResponse;
 import org.apache.http.StatusLine;
 
@@ -125,7 +125,8 @@ public class QuICDocEdit extends Activity {
     }
 
 
-    Thread timer = new Thread() {	    
+    Thread timer = new Thread() {
+	    @Override	    
 	    public void run () {
 		while (focused) {
 		    Message.obtain(client.mHandler, Tag.SYNC_DOC.ordinal(), doc).sendToTarget();
@@ -141,7 +142,7 @@ public class QuICDocEdit extends Activity {
 class QuICClient extends Thread {
     private Handler backHandler;
     public Handler mHandler;
-    final AndroidHttpClient httpClient = AndroidHttpClient.newInstance("QuICDoc");
+    final DefaultHttpClient httpClient = new DefaultHttpClient();
     String serverName;
     int myId;
 
@@ -163,7 +164,7 @@ class QuICClient extends Thread {
 	    case GET_DOC: serverName = (String) msg.obj; getDoc(); break;
 	    case UPDATE_SERVER: updateServer((DiffArray) msg.obj); break;
 	    case SYNC_DOC: syncDoc((String) msg.obj); break;
-	    case STOP: Looper.myLooper().quit(); httpClient.close();
+	    case STOP: Looper.myLooper().quit();
 	    }
 	}
     }
