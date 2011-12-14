@@ -1,5 +1,6 @@
 package org.quicdoc;
 
+import android.util.Log;
 import android.widget.EditText;
 import android.widget.TextView.BufferType;
 import org.json.*;
@@ -35,7 +36,7 @@ class Diff extends JSONObject {
 	} catch (JSONException e) {}
     }
 
-    public EditText applyDiff(EditText t) {
+    public EditText apply(EditText t) {
 	String s = t.getText().toString();
 	int selStart = t.getSelectionStart();
 	int selEnd = t.getSelectionEnd();
@@ -90,6 +91,13 @@ class Diff extends JSONObject {
 }
 
 class DiffArray extends JSONArray {
+    public DiffArray() { }
+
+    public DiffArray(JSONArray j) {
+	for (int i = 0; i < j.length(); i++)
+	    try { put(j.get(i)); } catch (JSONException e) { }
+    }
+
     public DiffArray(String oldStr, String newStr) {
         if (oldStr.equals(newStr)) return;
 
@@ -123,5 +131,52 @@ class DiffArray extends JSONArray {
 	    // Some stuff was added
 	    put(new Diff(start, s.subSequence(start,start + count).toString()));
         }
+    }
+
+    public Diff getDiff(int i) {
+	try {
+	    JSONObject o = getJSONObject(i);
+	    Diff d;
+	    if (o.getString("type").equals("insert"))
+		d = new Diff(o.getInt("point"),
+			     o.getString("content"));
+	    else {
+		d = new Diff(o.getInt("point"),
+			     o.getInt("length"));
+	    }
+	    return d;
+	} catch (JSONException e) {
+	    Log.d("quicdoc", "Got an ununJSONable diff array");
+	    return null;
+	}
+    }
+
+    public Boolean apply(EditText t) {
+	Boolean did_something = false;
+	
+	for (int i = 0; i < length(); i++) {
+	    Diff d = getDiff(i);
+	    d.apply(t);
+	    did_something = true;
+	}
+	return did_something;
+    }
+
+    public Boolean updateAfter(DiffArray diffs) {
+	for (int i = 0; i < length(); i++) {
+	    Diff d = getDiff(i);
+	    for (int j = 0; j < diffs.length(); j++) {
+		Diff e = diffs.getDiff(j);
+		if (d.clashWith(e))
+		    return false;
+		d.updateAfter(e);
+	    }
+	    try {
+		put(i, d);
+	    } catch (JSONException e) { }
+	    if (i == length()-1)
+		Log.i("quicdoc","new diff from server:"+this);
+	}
+	return true;
     }
 }

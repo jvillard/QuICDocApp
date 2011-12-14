@@ -38,6 +38,7 @@ enum Tag {
 public class QuICDocEdit extends Activity {
     String doc = "Loading document.";
     String marty = "Loading document.";
+    DiffArray doc_to_marty = new DiffArray();
     EditText editText;
     String serverName = "roquette.dyndns.org:4242";
     private Handler uiHandler;
@@ -88,28 +89,13 @@ public class QuICDocEdit extends Activity {
 		break;
 	    case SYNCED_DOC:
 		editText.removeTextChangedListener(docWatcher);
-		JSONArray diffs = (JSONArray) msg.obj; 
-		int i;
-		for (i = 0; i < diffs.length(); i++) {
-		    try {
-			JSONObject o = diffs.getJSONObject(i);
-			Diff d;
-			if (o.getString("type").equals("insert"))
-			    d = new Diff(o.getInt("point"),
-					 o.getString("content"));
-			else {
-			    d = new Diff(o.getInt("point"),
-					 o.getInt("length"));
-			}
-			d.applyDiff(editText);
-		    } catch (org.json.JSONException e) {
-			Log.d("quicdoc", "Got an ununJSONable diff array");
-		    }
-		}
-		doc = marty = editText.getText().toString();
-		editText.addTextChangedListener(docWatcher);
-		if (i > 0)
+		DiffArray diffs = new DiffArray((JSONArray) msg.obj);
+		diffs.updateAfter(doc_to_marty);
+		if (diffs.apply(editText))
 		    Log.i("quicdoc", "Applied modifs from server.");
+		doc = marty = editText.getText().toString();
+		doc_to_marty = new DiffArray();
+		editText.addTextChangedListener(docWatcher);
 	    }
 	}
     }
@@ -117,9 +103,16 @@ public class QuICDocEdit extends Activity {
     private class DocWatcher implements TextWatcher {
 	public void onTextChanged(CharSequence s, int start, int before, int count) { }
 	public void afterTextChanged(Editable s) {
-	    marty = s.toString();
-	    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), new DiffArray(doc, marty)).sendToTarget();
-	    doc = marty;
+	    String new_text = s.toString();
+	    DiffArray diff = new DiffArray(marty, new_text);
+	    Message.obtain(client.mHandler, Tag.UPDATE_SERVER.ordinal(), diff).sendToTarget();
+	    for (int i = 0; i < diff.length(); i++)
+		try {
+		    doc_to_marty.put(diff.get(i));
+		} catch (org.json.JSONException e) {
+		    Log.d("quicdoc", "Something went horribly wrong with the Diff lib.");
+		}
+	    marty = new_text;
 	}
 	public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
     }
